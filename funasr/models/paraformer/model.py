@@ -345,39 +345,17 @@ class Paraformer(torch.nn.Module):
     #3.เราจะทำการตัดแต่ละ index โดยการทำ Summation of each CTC_prob / CTC_len 
     #4.เราจะได้เราจะนำ index ไปผ่าน Argmax แล้วเราจะได้ CTC_prob output 
 
-    def _compute_ctc_tokens(self, encoder_out, pre_peak_index):
-        CTC_prob = F.softmax(encoder_out,dim=-1)
-        Index = []
-        cumulative_sum = torch.tensor(0.0, device = pre_peak_index.device)
-        for idx in range(pre_peak_index.size(0)):
-            value = pre_peak_index[idx]
-            if value.dim() > 0:
-                value = value.sum()
-            cumulative_sum += value.item()
-            if cumulative_sum > 1.0:
-                fire_index.append(True)
-                cummulative_sum = cumulative_sum - 1
-            else:
-                fire_index.append(False)
-        Index = torch.tensor(Index, device = pre_peak_index.device)
-
-        Segment = []
-        start_idx = 0
-        for idx in range(len(Index)):
-            if fire_index[idx].item():
-                segments.append(CTC_prob[start_idx:idx])
-                start_idx = idx
-        segments.append(CTC_prob[start_idx:])
-
-        CTC_token_out = []
-        for segment in Segment:
-            segment[:, self.blank_id] = 0
-            seg_prob = torch.sum(segment, dim 0) / segment.size(0)
-            best_token = torch.argmax(seg_prob)
+    def _calc_ctc_tokens(self, ctc):
+        ctc_prob = F.softmax(ctc)
+            ctc_prob_mask = ~make_pad_mask(ctc_prob, maxlen = ctc_prob.size(1))[:, None, :]).to(ctc.device)
+            segment_ctc_prob = torch.sum(ctc_pro_mask, dim=0) / ctc_prob_size(0)
+            best_ctc_token = torch.argmax(segment_ctc_prob)
             if best_token >= self.vocab_size:
                 best_token = self.vocab_size -1
-            CTC_token_out.append(best_token)
-        return CTC_token_out
+            ctc_token_out.append(best_ctc_token)
+        return ctc_token_out
+        
+    
 
     def sampler(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, pre_acoustic_embeds):
 
