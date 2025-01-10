@@ -336,6 +336,49 @@ class Paraformer(torch.nn.Module):
 
         return loss_att, acc_att, cer_att, wer_att, loss_pre, pre_loss_att
 
+    #ที่เพิ่มมาในส่วนนี้ก็คือ เราจะไม่ใช่ Hidder represetation ที่ผ่านจาก Encoder ไปยัง predictor เพราะว่ามันจะมี gap ระหว่างขอมูล
+    #แต่ที่เราจะทำก็คือเนื่องจาก Hidden representation ที่ผ่านไปยังส่วน Encoder นั้นเป็น representation ของ Audio data ไม่ใช่ text data ทำให้เมื่อนำไปผ่าน predictor จะมี gap ระหว่าง data นั้นๆ
+    #เราเลยจะเพิ่ม block ในส่วนของ Encoder เพื่อทำการตัด Hidden represenation ของ Audio data
+    #Encoder จะไปกอบไปด้วย 2 block หลักด้วยกัน 1.CNN 2.Conformer แต่ในส่วนสุดท้ายคือ Linear layer และ Softmax
+    #1.เราจะทำการคำนวนหา CTC_prob หลักการของ CTC ก็คือเมื่อเวลาที่ Model จะพ้นคำๆว่า Kow ออกมาได้มันอาจจะเป็นประมาณนี้ KK__oo__ww CTCจะตัดคำซ้ำและBlankspace(_)ออก เพื่อoutput Kow
+    #2.เราจะทำการ Mask ค่าของ CTC_prob
+    #3.เราจะทำการตัดแต่ละ index โดยการทำ Summation of each CTC_prob / CTC_len 
+    #4.เราจะได้เราจะนำ index ไปผ่าน Argmax แล้วเราจะได้ CTC_prob output 
+
+    def _compute_ctc_tokens(self, encoder_out, pre_peak_index):
+        CTC_prob = F.softmax(encoder_out,dim=-1)
+        Index = []
+        cumulative_sum = torch.tensor(0.0, device = pre_peak_index.device)
+        for idx in range(pre_peak_index.size(0)):
+            value = pre_peak_index[idx]
+            if value.dim() > 0:
+                value = value.sum()
+            cumulative_sum += value.item()
+            if cumulative_sum > 1.0:
+                fire_index.append(True)
+                cummulative_sum = cumulative_sum - 1
+            else:
+                fire_index.append(False)
+        Index = torch.tensor(Index, device = pre_peak_index.device)
+
+        Segment = []
+        start_idx = 0
+        for idx in range(len(Index)):
+            if fire_index[idx].item():
+                segments.append(CTC_prob[start_idx:idx])
+                start_idx = idx
+        segments.append(CTC_prob[start_idx:])
+
+        CTC_token_out = []
+        for segment in Segment:
+            segment[:, self.blank_id] = 0
+            seg_prob = torch.sum(segment, dim 0) / segment.size(0)
+            best_token = torch.argmax(seg_prob)
+            if best_token >= self.vocab_size:
+                best_token = self.vocab_size -1
+            CTC_token_out.append(best_token)
+        return CTC_token_out
+
     def sampler(self, encoder_out, encoder_out_lens, ys_pad, ys_pad_lens, pre_acoustic_embeds):
 
         tgt_mask = (~make_pad_mask(ys_pad_lens, maxlen=ys_pad_lens.max())[:, :, None]).to(
